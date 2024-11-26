@@ -1,4 +1,6 @@
-npm install-
 ejs
 express-session
 md5
+cors
+express
+mysql2
