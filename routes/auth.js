@@ -16,7 +16,7 @@ authRouter.get('/checkLogin', (req, res) => {
     res.json({
         loggedIn: req.session.loggedIn,
         user: req.session.user,
-        message: "Loggeed-In: " + req.session.loggedIn
+        message: "Logged-In: " + req.session.loggedIn
     });
 });
 
@@ -35,16 +35,16 @@ authRouter.get('/logout', (req, res) => {
 });
 
 authRouter.put('/updateUser/:id', (req, res) => {
-    console.log("update request", req.body);
+    console.log("Update request", req.body);
     db.updateUser(req, res);
 });
 
 authRouter.post('/activate', (req, res) => {
-    db.doCud(res, 'update', 'users', new Map(['active', '1']), `where username='${req.body.user}`, `User ${req.body, user} activated!`, 'User Activation failed!');
+    db.dbCud(res, 'update', 'users', new Map([['active', '1']]), `where username='${req.body.user}'`, `User ${req.body.user} activated!`, 'User Activation failed!');
 });
 
 authRouter.post('/deactivate', (req, res) => {
-    db.doCud(res, 'update', 'users', new Map(['active', '0']), `where username='${req.body.user}`, `User ${req.body, user} de-activated!`, 'User De-Activation failed!');
+    db.dbCud(res, 'update', 'users', new Map([['active', '0']]), `where username='${req.body.user}'`, `User ${req.body.user} de-activated!`, 'User De-Activation failed!');
 });
 
 module.exports = authRouter;

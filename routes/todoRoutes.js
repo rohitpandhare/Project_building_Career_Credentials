@@ -1,35 +1,22 @@
 const express = require('express');
-var todoRouter = express.Router();
+const todoRouter = express.Router();
 const db = require('../db-ops/dbHandler');
 const authM = require('../middleware/auth-middle-ware');
-const { route } = require('./auth');
 
-todoRouter.post('/activate', (req, res) => {
-    db.dbCud(res, 'update', 'users', new Map([['active', '1']]), `where id=${req.body.userId}, User ${req.body.userId} activated!`, 'Activating User failed!');
+todoRouter.get('/gettodo', authM.chkLogin, (req, res) => {
+    const uid = req.session.uid;
+    db.dbRead(res, 'tasks', `WHERE uid = '${uid}'`);  
 });
 
-todoRouter.post('/deactivate', (req, res) => {
-    db.dbCud(res, 'update', 'users', new Map([['active', '0']]), `where id=${req.body.userId}, User ${req.body.userId} deactivated! `, 'Deactivating User failed!');
+todoRouter.get('/gettodo/:id', authM.chkLogin, (req, res) => {
+    const uid = req.session.uid;
+    const taskId = req.params.id;
+    db.dbRead(res, 'tasks', `WHERE id = '${taskId}' AND uid = '${uid}'`);
 });
-
-function getFormattedTodayDate() {
-    const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = today.getFullYear();
-    return `${year}-${month}-${day}`;
-}
-
-function getCurrentTime() {
-    return new Date().toLocaleTimeString('en-GB', { hour12: false });
-}
 
 todoRouter.post('/addtodo', authM.chkLogin, (req, res) => {
     const { title, details } = req.body;
     const uid = req.session.uid;
-
-    console.log("Request Body:", req.body);
-    console.log("UID:", uid);
 
     if (!title || !details || !uid) {
         return res.status(400).json({
@@ -38,88 +25,80 @@ todoRouter.post('/addtodo', authM.chkLogin, (req, res) => {
         });
     }
 
-    const createdDate = getFormattedTodayDate();
-    const updatedTime = getCurrentTime();
+    const createDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const colValMap = new Map();
+    colValMap.set('title', title);
+    colValMap.set('details', details);
+    colValMap.set('uid', uid);
+    colValMap.set('created_date', createDate);
+    colValMap.set('updated_time', createDate);
 
-    let todo = new Map([
-        ['title', title],
-        ['details', details],
-        ['uid', uid],
-        ['created_date', createdDate],
-        ['updated_time', updatedTime]
-    ]);
-
-    db.dbCud(res, 'insert', 'tasks', todo, null, `Task ${title} added!`, `Adding Task failed!`);
+    db.dbCud(res, 'insert', 'tasks', colValMap, null, `Task ${title} added!`, `Adding Task failed!`);
 });
 
-todoRouter.post('/edittodo', authM.chkLogin, async (req, res) => {
-    const { titleId, title, newTitle, newDetails } = req.body;
+todoRouter.post('/edittodo', authM.chkLogin, (req, res) => {
+    console.log("Received POST on /edittodo:", req.body);
+
+    const { id, title, details } = req.body;
     const uid = req.session.uid;
 
-    console.log("Request to edit task:");
-    console.log("Title ID:", titleId);
-    console.log("Current Title:", title);
-    console.log("New Title:", newTitle);
-    console.log("New Details:", newDetails);
-    console.log("User ID:", uid);
-
-    if (!titleId || !title || !uid || (!newTitle && !newDetails)) {
+    if (!id || (!title && !details) || !uid) {
         return res.status(400).json({
             message: "Updating Task failed!",
-            error: "Task titleId, title, user ID, and at least one of new title or new details must be provided."
+            error: "ID, title, details, and user ID must be provided."
         });
     }
 
-    const checkCondition = `id = ? AND uid = ? AND title = ?`;
-    const checkColValMap = new Map([
-        ['title', title],
-    ]);
-    const checkValues = [titleId, uid, title];
+    const updateColValMap = new Map();
+    if (title) {
+        updateColValMap.set('title', title);
+    }
+    if (details) {
+        updateColValMap.set('details', details);
+    }
 
-    db.dbCud(res, 'select', 'tasks', checkColValMap, checkCondition, 'Task found', 'Task not found', (taskCheckResult) => {
-        if (!taskCheckResult || taskCheckResult.length === 0) {
-            return res.status(404).json({ message: `Task with title "${title}" and ID "${titleId}" not found for this user.` });
+    const query = `UPDATE tasks SET ${Array.from(updateColValMap.keys())
+        .map((key) => `${key} = ?`)
+        .join(', ')} WHERE id = ? AND uid = ?`;
+
+    const values = [...Array.from(updateColValMap.values()), id, uid];
+
+    db.conPool.query(query, values, (err, result) => {
+        if (err) {
+            console.error('Error during update:', err);
+            return res.status(500).json({ message: "Failed to update task.", error: err.message });
         }
 
-        const updateColValMap = new Map();
-        if (newTitle) {
-            updateColValMap.set('title', newTitle);
-        }
-        if (newDetails) {
-            updateColValMap.set('details', newDetails);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Task not found or not owned by user." });
         }
 
-        db.dbCud(res, 'update', 'tasks', updateColValMap, `id = ? AND uid = ?`,
-            `Task "${title}" updated successfully!`,
-            `Failed to update task.`, [titleId, uid]);
+        res.status(200).json({ message: "Task updated successfully!" });
     });
 });
 
-todoRouter.post('/gettodo', authM.chkLogin, (req, res) => {
-    const uid = req.session.uid;
-    console.log("UID:", uid);
-
-    const columns = ['title', 'details', 'created_date', 'updates_time', 'completed'];
-    db.dbRead(res, 'tasks', `WHERE uid = ?`, [uid]);
-});
-
 todoRouter.post('/deltodo', authM.chkLogin, (req, res) => {
-    const { title } = req.body;
+    const { id } = req.body;
     const uid = req.session.uid;
 
-    console.log("Request to delete task with title:", title);
-    console.log("User ID:", uid);
-
-    if (!title || !uid) {
-        return res.status(400).json({
-            message: "Deleting Task failed!",
-            error: "Task title and user ID must be provided."
-        });
+    if (!id || !uid) {
+        return res.status(400).json({ message: "Deleting Task failed!", error: "ID and user ID must be provided." });
     }
 
-    db.dbCud(res, 'delete', 'tasks', { title: title, uid: uid }, `WHERE title = ? AND uid = ?`,
-        `Task "${title}" deleted!`,
-        `Deleting Task failed!`);
+    const query = 'DELETE FROM tasks WHERE id = ? AND uid = ?';
+
+    db.conPool.query(query, [id, uid], (err, result) => {
+        if (err) {
+            console.error('Error during deletion:', err);
+            return res.status(500).json({ message: "Failed to delete task.", error: err.message });
+        }
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Task not found." });
+        }
+
+        res.status(200).json({ message: "Task deleted successfully!" });
+    });
 });
 
 module.exports = todoRouter;
